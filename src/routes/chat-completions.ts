@@ -25,12 +25,44 @@ chatCompletionsRouter.post(
   "/chat/completions",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Log incoming request
+      logger.info("Incoming chat completion request", {
+        model: req.body?.model,
+        stream: req.body?.stream,
+        messageCount: req.body?.messages?.length,
+        hasTools: !!req.body?.tools,
+        toolCount: req.body?.tools?.length,
+      });
+
       const body = validateRequest(req.body);
+
+      // Log validated request details
+      logger.info("Validated request", {
+        messageRoles: body.messages.map(m => m.role),
+        messageLengths: body.messages.map(m =>
+          typeof m.content === 'string' ? m.content.length :
+          Array.isArray(m.content) ? m.content.length : 0
+        ),
+      });
+
       const claudePrompt = convertOpenAIToClaude(body);
+
+      logger.info("Converted to Claude prompt", {
+        promptLength: claudePrompt.prompt.length,
+        promptPreview: claudePrompt.prompt.substring(0, 500),
+        hasSystemPrompt: !!claudePrompt.systemPrompt,
+        systemPromptLength: claudePrompt.systemPrompt?.length,
+      });
+
       const requestedModel = body.model || "claude-sonnet-4-5";
 
       // Map to SDK model name (opus, sonnet, haiku)
       const sdkModel = MODEL_MAP[requestedModel] || "sonnet";
+
+      logger.info("Model mapping", {
+        requestedModel,
+        sdkModel,
+      });
 
       if (body.stream) {
         await handleStreamingRequest(res, claudePrompt, requestedModel, sdkModel);
@@ -88,6 +120,13 @@ async function handleStreamingRequest(
 ): Promise<void> {
   const completionId = generateCompletionId();
 
+  logger.info("Starting streaming request", {
+    completionId,
+    responseModel,
+    sdkModel,
+    noToolExecution: config.noToolExecution,
+  });
+
   setupSSE(res);
 
   // Send initial chunk with role
@@ -95,6 +134,7 @@ async function handleStreamingRequest(
 
   let hasToolCalls = false;
   let sentToolCallIds = new Set<string>();
+  let messageCount = 0;
 
   try {
     const iterator = queryClaudeAgent({
@@ -105,11 +145,25 @@ async function handleStreamingRequest(
     });
 
     for await (const message of iterator) {
+      messageCount++;
+      logger.info(`Processing streaming message ${messageCount}`, {
+        messageType: message.type,
+        isAssistant: isAssistantMessage(message),
+      });
+
       if (isAssistantMessage(message)) {
         const { textContent, toolCalls } = extractContent(message);
 
+        logger.info("Extracted content from assistant message", {
+          textContentLength: textContent.length,
+          textContentPreview: textContent.substring(0, 200),
+          toolCallCount: toolCalls.length,
+          toolCallNames: toolCalls.map(tc => tc.function.name),
+        });
+
         // Send text content
         if (textContent) {
+          logger.info("Sending text content chunk", { length: textContent.length });
           sendChunk(res, buildContentChunk(completionId, responseModel, textContent));
         }
 
@@ -120,13 +174,33 @@ async function handleStreamingRequest(
           // Filter to only new tool calls
           const newToolCalls = toolCalls.filter((tc) => !sentToolCallIds.has(tc.id));
 
+          logger.info("Processing tool calls", {
+            totalToolCalls: toolCalls.length,
+            newToolCalls: newToolCalls.length,
+            alreadySent: sentToolCallIds.size,
+          });
+
           if (newToolCalls.length > 0) {
+            for (const tc of newToolCalls) {
+              logger.info("Sending tool call", {
+                id: tc.id,
+                name: tc.function.name,
+                arguments: tc.function.arguments,
+              });
+            }
             sendChunk(res, buildToolCallChunk(completionId, responseModel, newToolCalls, true));
             newToolCalls.forEach((tc) => sentToolCallIds.add(tc.id));
           }
         }
       }
     }
+
+    logger.info("Streaming complete", {
+      completionId,
+      messageCount,
+      hasToolCalls,
+      totalToolCallsSent: sentToolCallIds.size,
+    });
 
     // Send final chunk
     sendChunk(res, buildFinalChunk(completionId, responseModel, hasToolCalls));
@@ -150,10 +224,18 @@ async function handleNonStreamingRequest(
 ): Promise<void> {
   const completionId = generateCompletionId();
 
+  logger.info("Starting non-streaming request", {
+    completionId,
+    responseModel,
+    sdkModel,
+    noToolExecution: config.noToolExecution,
+  });
+
   const collectedContent: string[] = [];
   const collectedToolCalls: OpenAIToolCall[] = [];
   let usage: OpenAIUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const seenToolCallIds = new Set<string>();
+  let messageCount = 0;
 
   try {
     const iterator = queryClaudeAgent({
@@ -164,28 +246,60 @@ async function handleNonStreamingRequest(
     });
 
     for await (const message of iterator) {
+      messageCount++;
+      logger.info(`Processing non-streaming message ${messageCount}`, {
+        messageType: message.type,
+        isAssistant: isAssistantMessage(message),
+        isResult: isResultMessage(message),
+      });
+
       if (isAssistantMessage(message)) {
         const { textContent, toolCalls } = extractContent(message);
 
+        logger.info("Extracted content from assistant message", {
+          textContentLength: textContent.length,
+          textContentPreview: textContent.substring(0, 200),
+          toolCallCount: toolCalls.length,
+          toolCallNames: toolCalls.map(tc => tc.function.name),
+        });
+
         if (textContent) {
           collectedContent.push(textContent);
+          logger.info("Added text content to collection", { totalParts: collectedContent.length });
         }
 
         // Deduplicate tool calls
         for (const tc of toolCalls) {
           if (!seenToolCallIds.has(tc.id)) {
+            logger.info("Adding new tool call", {
+              id: tc.id,
+              name: tc.function.name,
+              arguments: tc.function.arguments,
+            });
             collectedToolCalls.push(tc);
             seenToolCallIds.add(tc.id);
+          } else {
+            logger.info("Skipping duplicate tool call", { id: tc.id });
           }
         }
       }
 
       if (isResultMessage(message)) {
         usage = extractUsage(message);
+        logger.info("Extracted usage from result message", { usage });
       }
     }
 
     const content = collectedContent.length > 0 ? collectedContent.join("\n\n") : null;
+
+    logger.info("Building final completion response", {
+      completionId,
+      messageCount,
+      contentLength: content?.length || 0,
+      toolCallCount: collectedToolCalls.length,
+      toolCallIds: collectedToolCalls.map(tc => tc.id),
+      usage,
+    });
 
     const completion = buildChatCompletion(
       completionId,
@@ -194,6 +308,11 @@ async function handleNonStreamingRequest(
       collectedToolCalls,
       usage
     );
+
+    logger.info("Sending non-streaming response", {
+      completionId,
+      responsePreview: JSON.stringify(completion).substring(0, 500),
+    });
 
     res.json(completion);
   } catch (error) {

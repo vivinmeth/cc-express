@@ -71,23 +71,50 @@ export async function* queryClaudeAgent(
     for await (const message of iterator) {
       const claudeMsg = message as ClaudeMessage;
 
-      // Detailed logging for debugging
-      logger.debug("Received Claude message", {
+      // Verbose logging for all messages
+      logger.info("Received Claude message", {
         type: claudeMsg.type,
         subtype: claudeMsg.subtype,
+        hasMessage: !!claudeMsg.message,
+        hasResult: !!claudeMsg.result,
       });
 
-      // Log tool calls in detail
-      if (claudeMsg.type === "assistant" && claudeMsg.message?.content) {
-        for (const block of claudeMsg.message.content) {
-          if (block.type === "tool_use") {
-            logger.info("Tool call detected", {
+      // Log full message content for debugging
+      if (claudeMsg.message?.content) {
+        logger.info("Message content blocks", {
+          blockCount: claudeMsg.message.content.length,
+          blockTypes: claudeMsg.message.content.map(b => b.type),
+        });
+
+        for (let i = 0; i < claudeMsg.message.content.length; i++) {
+          const block = claudeMsg.message.content[i];
+          if (block.type === "text") {
+            logger.info(`Content block ${i}: text`, {
+              textLength: block.text?.length || 0,
+              textPreview: block.text?.substring(0, 200),
+            });
+          } else if (block.type === "tool_use") {
+            logger.info(`Content block ${i}: tool_use`, {
               toolName: block.name,
               toolId: block.id,
               toolInput: JSON.stringify(block.input),
             });
+          } else {
+            logger.info(`Content block ${i}: ${block.type}`, {
+              block: JSON.stringify(block),
+            });
           }
         }
+      }
+
+      // Log result messages
+      if (claudeMsg.type === "result") {
+        logger.info("Result message", {
+          result: claudeMsg.result,
+          durationMs: claudeMsg.duration_ms,
+          costUsd: claudeMsg.total_cost_usd,
+          usage: claudeMsg.usage,
+        });
       }
 
       yield claudeMsg;

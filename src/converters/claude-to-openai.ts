@@ -38,6 +38,19 @@ export interface ConvertedContent {
   toolCalls: OpenAIToolCall[];
 }
 
+// Transform Claude Code parameter names to common OpenAI/client conventions
+function transformToolInput(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
+  const transformed: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(input)) {
+    // Convert snake_case to camelCase for common parameters
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    transformed[camelKey] = value;
+  }
+
+  return transformed;
+}
+
 export function extractContent(message: ClaudeMessage): ConvertedContent {
   const textParts: string[] = [];
   const toolCalls: OpenAIToolCall[] = [];
@@ -58,17 +71,22 @@ export function extractContent(message: ClaudeMessage): ConvertedContent {
         toolInput: block.input,
       });
 
+      // Transform parameter names from snake_case to camelCase
+      const transformedInput = transformToolInput(block.name, block.input || {});
+
       // Convert Claude tool use to OpenAI tool call format
       const toolCall: OpenAIToolCall = {
         id: block.id || generateToolCallId(),
         type: "function",
         function: {
           name: block.name,
-          arguments: JSON.stringify(block.input || {}),
+          arguments: JSON.stringify(transformedInput),
         },
       };
 
       logger.info("Converted tool call", {
+        originalInput: JSON.stringify(block.input),
+        transformedInput: JSON.stringify(transformedInput),
         convertedToolCall: JSON.stringify(toolCall),
       });
 
