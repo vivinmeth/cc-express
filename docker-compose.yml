@@ -1,0 +1,37 @@
+services:
+  cc-express:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cc-express
+    restart: unless-stopped
+    user: root
+    ports:
+      - "${PORT:-28000}:28000"
+    environment:
+      - HOME=/root
+      - NODE_ENV=production
+      - PORT=28000
+      - API_SECRET=${API_SECRET}
+      - WORKING_DIR=/workspace
+      - ALLOWED_TOOLS=${ALLOWED_TOOLS:-Read,Edit,Bash}
+      - PERMISSION_MODE=${PERMISSION_MODE:-acceptEdits}
+      - MAX_TURNS=${MAX_TURNS:-50}
+      - NO_TOOL_EXECUTION=${NO_TOOL_EXECUTION:-true}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      # Mount workspace for file operations
+      - ${WORKING_DIR:-./workspace}:/workspace
+      # Mount Claude Code authentication
+      - ${HOME}/.claude:/root/.claude
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:28000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
