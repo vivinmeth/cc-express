@@ -1,5 +1,7 @@
 # CC-Express
 
+NOTE: DO NOT USE THIS, it's unreliable and it's not worth getting your account banned.
+
 An Express server that exposes OpenAI-compatible API endpoints wrapping the Claude Code SDK (`@anthropic-ai/claude-code`). This allows you to use Claude Code's agentic capabilities through standard OpenAI API clients.
 
 > **WARNING: Personal Use Only**
