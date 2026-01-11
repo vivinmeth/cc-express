@@ -17,7 +17,7 @@ import { ValidationError } from "../middleware/error-handler.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { MODEL_MAP } from "./models.js";
-import type { OpenAIChatRequest, OpenAIToolCall, OpenAIUsage } from "../types/openai.js";
+import type { OpenAIChatRequest, OpenAIToolCall, OpenAIUsage, OpenAITool } from "../types/openai.js";
 
 export const chatCompletionsRouter = Router();
 
@@ -65,9 +65,9 @@ chatCompletionsRouter.post(
       });
 
       if (body.stream) {
-        await handleStreamingRequest(res, claudePrompt, requestedModel, sdkModel);
+        await handleStreamingRequest(res, claudePrompt, requestedModel, sdkModel, body.tools);
       } else {
-        await handleNonStreamingRequest(res, claudePrompt, requestedModel, sdkModel);
+        await handleNonStreamingRequest(res, claudePrompt, requestedModel, sdkModel, body.tools);
       }
     } catch (error) {
       next(error);
@@ -116,7 +116,8 @@ async function handleStreamingRequest(
   res: Response,
   claudePrompt: { prompt: string; systemPrompt?: string },
   responseModel: string,
-  sdkModel: string
+  sdkModel: string,
+  tools?: OpenAITool[]
 ): Promise<void> {
   const completionId = generateCompletionId();
 
@@ -125,6 +126,8 @@ async function handleStreamingRequest(
     responseModel,
     sdkModel,
     noToolExecution: config.noToolExecution,
+    hasTools: !!tools,
+    toolCount: tools?.length || 0,
   });
 
   setupSSE(res);
@@ -142,6 +145,7 @@ async function handleStreamingRequest(
       systemPrompt: claudePrompt.systemPrompt,
       model: sdkModel,
       noToolExecution: config.noToolExecution,
+      tools,
     });
 
     for await (const message of iterator) {
@@ -220,7 +224,8 @@ async function handleNonStreamingRequest(
   res: Response,
   claudePrompt: { prompt: string; systemPrompt?: string },
   responseModel: string,
-  sdkModel: string
+  sdkModel: string,
+  tools?: OpenAITool[]
 ): Promise<void> {
   const completionId = generateCompletionId();
 
@@ -229,6 +234,8 @@ async function handleNonStreamingRequest(
     responseModel,
     sdkModel,
     noToolExecution: config.noToolExecution,
+    hasTools: !!tools,
+    toolCount: tools?.length || 0,
   });
 
   const collectedContent: string[] = [];
@@ -243,6 +250,7 @@ async function handleNonStreamingRequest(
       systemPrompt: claudePrompt.systemPrompt,
       model: sdkModel,
       noToolExecution: config.noToolExecution,
+      tools,
     });
 
     for await (const message of iterator) {

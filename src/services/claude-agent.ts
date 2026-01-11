@@ -2,12 +2,15 @@ import { query } from "@anthropic-ai/claude-code";
 import { config, type PermissionMode } from "../config.js";
 import { logger } from "../utils/logger.js";
 import type { ClaudeMessage } from "../converters/claude-to-openai.js";
+import type { OpenAITool } from "../types/openai.js";
+import { createMcpServerFromOpenAITools, getMcpToolNames } from "../converters/openai-tools-to-mcp.js";
 
 export interface AgentOptions {
   prompt: string;
   systemPrompt?: string;
   model?: string; // "opus", "sonnet", or "haiku"
   noToolExecution?: boolean; // Return tool calls without executing
+  tools?: OpenAITool[]; // Client-provided tools
 }
 
 function mapPermissionMode(mode: PermissionMode): string {
@@ -26,11 +29,16 @@ function mapPermissionMode(mode: PermissionMode): string {
 export async function* queryClaudeAgent(
   options: AgentOptions
 ): AsyncGenerator<ClaudeMessage, void, unknown> {
+  const hasClientTools = options.tools && options.tools.length > 0;
+
   logger.info("Starting Claude Agent query", {
     promptLength: options.prompt.length,
     hasSystemPrompt: !!options.systemPrompt,
     model: options.model || "default",
-    allowedTools: config.allowedTools,
+    hasClientTools,
+    clientToolCount: options.tools?.length || 0,
+    clientToolNames: options.tools?.map(t => t.function.name) || [],
+    noToolExecution: options.noToolExecution,
     permissionMode: config.permissionMode,
     maxTurns: config.maxTurns,
     workingDir: config.workingDir,
@@ -38,14 +46,35 @@ export async function* queryClaudeAgent(
 
   try {
     const queryOptions: Record<string, unknown> = {
-      allowedTools: config.allowedTools,
       permissionMode: mapPermissionMode(config.permissionMode),
       maxTurns: options.noToolExecution ? 1 : config.maxTurns,
       cwd: config.workingDir,
     };
 
+    // If client provides tools, use them via MCP instead of Claude Code's built-in tools
+    if (hasClientTools) {
+      const mcpServer = createMcpServerFromOpenAITools(options.tools!);
+      if (mcpServer) {
+        queryOptions.mcpServers = {
+          "client-tools": mcpServer,
+        };
+
+        // Only allow the client's tools, not Claude Code's built-in tools
+        const mcpToolNames = getMcpToolNames(options.tools!);
+        queryOptions.allowedTools = mcpToolNames;
+
+        logger.info("Configured MCP server with client tools", {
+          mcpToolNames,
+          toolCount: mcpToolNames.length,
+        });
+      }
+    } else {
+      // No client tools - use Claude Code's built-in tools
+      queryOptions.allowedTools = config.allowedTools;
+    }
+
     if (options.systemPrompt) {
-      queryOptions.systemPrompt = options.systemPrompt;
+      queryOptions.appendSystemPrompt = options.systemPrompt;
     }
 
     if (options.model) {
@@ -55,7 +84,7 @@ export async function* queryClaudeAgent(
     // If noToolExecution, deny all tool calls but still return them in response
     if (options.noToolExecution) {
       queryOptions.canUseTool = async (toolName: string, toolInput: unknown) => {
-        logger.debug("Tool call intercepted (not executing)", { toolName, toolInput });
+        logger.info("Tool call intercepted (not executing)", { toolName, toolInput });
         return {
           behavior: "deny" as const,
           message: "Tool execution disabled - returning tool call to client",

@@ -13,7 +13,7 @@ importers:
         version: 1.0.128
       '@anthropic-ai/sdk':
         specifier: ^0.71.2
-        version: 0.71.2
+        version: 0.71.2(zod@4.3.5)
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
@@ -26,6 +26,9 @@ importers:
       winston:
         specifier: ^3.17.0
         version: 3.19.0
+      zod:
+        specifier: ^4.3.5
+        version: 4.3.5
     devDependencies:
       '@types/express':
         specifier: ^4.17.21
@@ -715,6 +718,9 @@ packages:
     resolution: {integrity: sha512-LZNJgPzfKR+/J3cHkxcpHKpKKvGfDZVPS4hfJCc4cCG0CgYzvlD6yE/S3CIL/Yt91ak327YCpiF/0MyeZHEHKA==}
     engines: {node: '>= 12.0.0'}
 
+  zod@4.3.5:
+    resolution: {integrity: sha512-k7Nwx6vuWx1IJ9Bjuf4Zt1PEllcwe7cls3VNzm4CQ1/hgtFUK2bRNG3rvnpPUhFjmqJKAKtjV576KnUkHocg/g==}
+
 snapshots:
 
   '@anthropic-ai/claude-code@1.0.128':
@@ -726,9 +732,11 @@ snapshots:
       '@img/sharp-linux-x64': 0.33.5
       '@img/sharp-win32-x64': 0.33.5
 
-  '@anthropic-ai/sdk@0.71.2':
+  '@anthropic-ai/sdk@0.71.2(zod@4.3.5)':
     dependencies:
       json-schema-to-ts: 3.1.1
+    optionalDependencies:
+      zod: 4.3.5
 
   '@babel/runtime@7.28.4': {}
 
@@ -1362,3 +1370,5 @@ snapshots:
       stack-trace: 0.0.10
       triple-beam: 1.4.1
       winston-transport: 4.9.0
+
+  zod@4.3.5: {}
